@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QuoteDesk · 跨境报价与毛利工作台</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a222c; --line:#2c3846; --text:#e8eef4; --muted:#93a4b5; --acc:#3dd6c6; --warn:#f0b429; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", "PingFang SC", sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:28px 24px 8px; max-width:1080px; margin:0 auto; }
+  h1 { margin:0 0 6px; font-size:28px; }
+  p.lead { color:var(--muted); margin:0 0 18px; }
+  main { max-width:1080px; margin:0 auto; padding:0 24px 48px; display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  h2 { margin:0 0 12px; font-size:16px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+  input, select { width:100%; background:#0f1419; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  button { margin-top:12px; background:var(--acc); color:#06211e; border:0; border-radius:8px; padding:10px 14px; font-weight:700; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); margin-left:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td { padding:6px 0; border-bottom:1px solid var(--line); }
+  td:last-child { text-align:right; }
+  .big { font-size:22px; color:var(--acc); font-weight:700; }
+  .note { font-size:12px; color:var(--muted); margin-top:10px; }
+  pre { white-space:pre-wrap; font-size:12px; background:#0f1419; padding:12px; border-radius:8px; }
+  @media (max-width:800px) { main { grid-template-columns:1fr; } }
+  @media print { body { background:#fff; color:#111; } section { break-inside:avoid; } button { display:none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>QuoteDesk</h1>
+  <p class="lead">给小微跨境卖家的报价、毛利和装箱单草稿。本地计算，不上传数据。这是可交付工具，不是已发生的收入。</p>
+</header>
+<main>
+  <section>
+    <h2>成本与条款</h2>
+    <label>卖方 / Seller</label><input id="seller" value="Your Company" />
+    <label>买方 / Buyer</label><input id="buyer" value="Buyer Co." />
+    <label>品名 / SKU</label><input id="sku" value="Sample goods" />
+    <div class="row">
+      <div><label>数量</label><input id="qty" type="number" value="1000" /></div>
+      <div><label>单位出厂成本 CNY</label><input id="cost" type="number" value="12.5" /></div>
+    </div>
+    <div class="row">
+      <div><label>国内运费合计 CNY</label><input id="inland" type="number" value="800" /></div>
+      <div><label>国际运费合计 CNY</label><input id="freight" type="number" value="4200" /></div>
+    </div>
+    <div class="row">
+      <div><label>保险+杂费合计 CNY</label><input id="extra" type="number" value="300" /></div>
+      <div><label>目标毛利率 %</label><input id="margin" type="number" value="28" /></div>
+    </div>
+    <div class="row">
+      <div><label>汇率 CNY / USD</label><input id="fx" type="number" step="0.01" value="7.15" /></div>
+      <div><label>贸易术语</label>
+        <select id="term">
+          <option>FOB</option><option selected>CIF</option><option>EXW</option><option>DDP</option>
+        </select>
+      </div>
+    </div>
+    <label>目的港 / 备注</label><input id="port" value="Los Angeles / 30% deposit, balance before shipment" />
+    <button onclick="calc()">生成报价</button>
+    <button class="ghost" onclick="window.print()">打印 / 导出 PDF</button>
+  </section>
+  <section>
+    <h2>结果</h2>
+    <table>
+      <tr><td>单位完全成本</td><td id="unitFull">—</td></tr>
+      <tr><td>单位报价 CNY</td><td id="unitQuote">—</td></tr>
+      <tr><td>单位报价 USD</td><td id="unitUsd">—</td></tr>
+      <tr><td>合同总额 CNY</td><td id="totalCny">—</td></tr>
+      <tr><td>合同总额 USD</td><td class="big" id="totalUsd">—</td></tr>
+      <tr><td>预估毛利 CNY</td><td id="profit">—</td></tr>
+    </table>
+    <p class="note">毛利 = 报价 − 出厂成本 − 按术语计入的运杂费。DDP 关税未自动估算，需手工计入杂费。非正式报关文件。</p>
+  </section>
+  <section style="grid-column:1 / -1">
+    <h2>可复制报价函</h2>
+    <pre id="letter">点击“生成报价”。</pre>
+  </section>
+</main>
+<script>
+function n(id){ return Number(document.getElementById(id).value) || 0; }
+function money(x){ return x.toLocaleString("zh-CN", {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function calc(){
+  const qty = n("qty"), cost = n("cost"), inland = n("inland"), freight = n("freight"), extra = n("extra");
+  const margin = n("margin")/100, fx = n("fx") || 1, term = document.getElementById("term").value;
+  let allocated = inland + extra;
+  if (term === "CIF" || term === "DDP") allocated += freight;
+  if (term === "EXW") allocated = extra;
+  const unitFull = cost + allocated / Math.max(qty,1);
+  const unitQuote = unitFull / Math.max(1-margin, 0.05);
+  const total = unitQuote * qty;
+  const profit = total - cost*qty - allocated;
+  document.getElementById("unitFull").textContent = money(unitFull) + " CNY";
+  document.getElementById("unitQuote").textContent = money(unitQuote) + " CNY";
+  document.getElementById("unitUsd").textContent = money(unitQuote/fx) + " USD";
+  document.getElementById("totalCny").textContent = money(total) + " CNY";
+  document.getElementById("totalUsd").textContent = money(total/fx) + " USD";
+  document.getElementById("profit").textContent = money(profit) + " CNY";
+  const seller = document.getElementById("seller").value;
+  const buyer = document.getElementById("buyer").value;
+  const sku = document.getElementById("sku").value;
+  const port = document.getElementById("port").value;
+  document.getElementById("letter").textContent =
+`COMMERCIAL QUOTATION / 报价单
+Seller: ${seller}
+Buyer: ${buyer}
+Item: ${sku}
+Qty: ${qty}
+Term: ${term}
+Destination / notes: ${port}
+Unit price: ${money(unitQuote/fx)} USD  (${money(unitQuote)} CNY)
+Total: ${money(total/fx)} USD  (${money(total)} CNY)
+FX used: 1 USD = ${fx} CNY
+Estimated gross profit: ${money(profit)} CNY
+Validity: 7 days. This draft is not a customs declaration.`;
+}
+calc();
+</script>
+</body>
+</html>
